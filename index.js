@@ -1,72 +1,84 @@
 import express from "express";
 import axios from "axios";
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 
 const app = express();
 app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
 
+// Shopify config
 const SHOP = process.env.SHOPIFY_STORE;
-const TOKEN = process.env.SHOPIFY_CLIENT_SECRET;
+const ACCESS_TOKEN = process.env.SHOPIFY_CLIENT_SECRET;
 
-// ================= MCP SERVER =================
-const server = new Server(
-  {
-    name: "glona-mcp",
-    version: "1.0.0",
-  },
-  {
-    capabilities: {
-      tools: {},
-    },
-  }
-);
+// =============================
+// MCP ENDPOINT
+// =============================
+app.post("/mcp", async (req, res) => {
+  const { action, input } = req.body;
 
-// 🛒 Tool: Get Products
-server.setRequestHandler("tools/list", async () => {
-  return {
-    tools: [
-      {
-        name: "get_products",
-        description: "Get all products from Shopify",
-      },
-    ],
-  };
-});
-
-server.setRequestHandler("tools/call", async (req) => {
-  if (req.params.name === "get_products") {
-    const res = await axios.get(
-      `https://${SHOP}/admin/api/2023-10/products.json`,
-      {
-        headers: {
-          "X-Shopify-Access-Token": TOKEN,
-        },
-      }
-    );
-
-    return {
-      content: [
+  try {
+    // TOOL 1: Get Products
+    if (action === "get_products") {
+      const response = await axios.get(
+        `https://${SHOP}/admin/api/2023-10/products.json`,
         {
-          type: "text",
-          text: JSON.stringify(res.data),
-        },
-      ],
-    };
-  }
+          headers: {
+            "X-Shopify-Access-Token": ACCESS_TOKEN,
+          },
+        }
+      );
 
-  return {
-    content: [{ type: "text", text: "Unknown tool" }],
-  };
+      return res.json({
+        success: true,
+        data: response.data.products,
+      });
+    }
+
+    // TOOL 2: Create Order
+    if (action === "create_order") {
+      const orderData = {
+        order: {
+          line_items: input.items,
+          customer: {
+            first_name: input.first_name,
+            last_name: input.last_name,
+            email: input.email,
+          },
+          financial_status: "pending",
+        },
+      };
+
+      const response = await axios.post(
+        `https://${SHOP}/admin/api/2023-10/orders.json`,
+        orderData,
+        {
+          headers: {
+            "X-Shopify-Access-Token": ACCESS_TOKEN,
+            "Content-Type": "application/json",
+          },
+        }
+      );
+
+      return res.json({
+        success: true,
+        data: response.data,
+      });
+    }
+
+    // Unknown action
+    return res.status(400).json({
+      error: "Unknown action",
+    });
+  } catch (error) {
+    return res.status(500).json({
+      error: error.message,
+    });
+  }
 });
 
-// تشغيل MCP
-const transport = new StdioServerTransport();
-server.connect(transport);
-
-// ================= EXPRESS =================
+// =============================
+// HEALTH CHECK
+// =============================
 app.get("/", (req, res) => {
   res.send("MCP Server Running 🚀");
 });
